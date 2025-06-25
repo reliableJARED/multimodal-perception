@@ -4,17 +4,14 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
-venv/
-.venv
-pip-log.txt
-pip-delete-this-directory.txt
+*.pyc
 
 # Virtual environments
 .env
 .venv
 env/
 venv/
+venv_mp/
 ENV/
 env.bak/
 venv.bak/
@@ -31,18 +28,37 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
 
-# Node modules (if using Node.js)
-node_modules/
-
-# Model files (often large)
+# Model files (IMPORTANT - Don't push large models!)
 *.pkl
 *.h5
 *.pth
+*.pt
 *.onnx
+*.bin
+*.safetensors
+models/
+checkpoints/
+pretrained/
+weights/
 
-# Data files
-*.csv
-*.json
-data/
-datasets/
+# Hugging Face cache (these get HUGE!)
+.cache/
+transformers_cache/
+huggingface_hub/
+~/.cache/huggingface/
+.huggingface/
+
+# Torch hub cache (also gets very large!)
+torch/
+.torch/
+torch_cache/
+~/.cache/torch/
+
+
+# Jupyter Notebooks checkpoints
+.ipynb_checkpoints/
+
+# Node modules (if using any JS tools)
+node_modules/

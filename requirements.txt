@@ -1,0 +1,45 @@
+# Multimodal Perception Requirements
+
+# Core ML Libraries
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+transformers>=4.30.0
+datasets>=2.14.0 #HuggingFace open-source library of datasets
+huggingface-hub>=0.33.1
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Computer Vision
+# SAM2 Model - install from GitHub
+git+https://github.com/facebookresearch/sam2.git
+
+# Computer Vision
+opencv-python>=4.8.0
+pillow>=9.5.0
+ultralytics>=8.0.0
+sam2>=1.1.0
+timm>=0.9.0
+scikit-image>=0.20.0
+pyvips-binary>=8.17.0 # pyvips with bundled libvips (no system dependency needed)
+pyvips>=3.0.0
+
+# Audio Processing
+librosa>=0.10.0
+soundfile>=0.12.1
+sounddevice>=0.4.6
+openai-whisper>=20230314
+speechbrain>=0.5.14
+onnxruntime>=1.15.0
+pydub>=0.25.1
+
+# Utilities
+matplotlib>=3.7.0
+accelerate>=0.20.0
+safetensors>=0.3.0
+tqdm>=4.65.0
+pandas>=2.0.0
+
+# Special installations (install manually if needed):
+# pip install git+https://github.com/facebookresearch/segment-anything.git
+# pip install git+https://github.com/snakers4/silero-vad.git
