@@ -1,6 +1,7 @@
 """
-Simple SAM Test using Transformers - Base Model
+Simple SAM Test using Transformers - Base Model with Center Point
 Clean test using Hugging Face transformers implementation
+Uses center point as default prompt for meaningful segmentation
 """
 import cv2
 import numpy as np
@@ -38,22 +39,33 @@ def main():
         print("Failed to capture frame")
         return
     
-    print("Running SAM segmentation...")
+    print("Running SAM segmentation on a point at the center of the image...")
     start_time = time.time()
     
     # Convert BGR to RGB and to PIL
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(rgb_frame)
     
-    # Use automatic mask generation approach - no input points needed
-    inputs = processor(pil_image, return_tensors="pt")
+    # Get image dimensions for center point
+    h, w = rgb_frame.shape[:2]
+    center_x, center_y = w // 2, h // 2
+    
+    # Use center point as input prompt
+    input_points = [[[center_x, center_y]]]
+    input_labels = [[1]]
+    
+    inputs = processor(
+        pil_image, 
+        input_points=input_points, 
+        input_labels=input_labels, 
+        return_tensors="pt"
+    )
     inputs = {k: v.to(device) for k, v in inputs.items()}
     
     with torch.no_grad():
         outputs = model(**inputs)
     
-    # Get masks - for automatic segmentation we need to use the mask decoder differently
-    # Let's try the simpler approach with no points first
+    # Get masks
     masks = processor.image_processor.post_process_masks(
         outputs.pred_masks.cpu(), 
         inputs["original_sizes"].cpu(), 
@@ -63,30 +75,23 @@ def main():
     inference_time = time.time() - start_time
     print(f"Segmentation completed in {inference_time:.2f}s")
     
-    # Convert masks to numpy and filter
-    if len(masks) > 0:
-        masks_np = masks[0].squeeze().numpy()
-        if len(masks_np.shape) == 2:  # Single mask
-            masks_np = [masks_np]
-        elif len(masks_np.shape) == 3:  # Multiple masks
-            masks_np = [masks_np[i] for i in range(masks_np.shape[0])]
-    else:
-        masks_np = []
+    # Select best mask using IoU scores
+    masks_np = masks[0].squeeze().numpy()
+    iou_scores = outputs.iou_scores.cpu().numpy().squeeze()
     
-    print(f"Found {len(masks_np)} masks")
+    if len(masks_np.shape) == 3:
+        best_mask_idx = np.argmax(iou_scores)
+        best_mask = masks_np[best_mask_idx]
+    else:
+        best_mask = masks_np
     
     # Create colored segmentation
     segmentation = np.zeros_like(frame)
     
-    for i, mask in enumerate(masks_np):
-        if mask.sum() > 500:  # Only use masks with sufficient area
-            # Generate color
-            hue = int(180 * i / len(masks_np))
-            color = cv2.cvtColor(np.uint8([[[hue, 255, 255]]]), cv2.COLOR_HSV2BGR)[0][0]
-            color = tuple(map(int, color))
-            
-            # Apply color to mask
-            segmentation[mask > 0] = color
+    if best_mask.sum() > 100:
+        # Use green for the segmented object
+        color = (0, 255, 0)
+        segmentation[best_mask > 0] = color
     
     # Save results
     timestamp = int(time.time())
