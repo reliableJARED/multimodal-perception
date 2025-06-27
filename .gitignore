@@ -62,3 +62,8 @@ torch_cache/
 
 # Node modules (if using any JS tools)
 node_modules/
+
+#Testing Results
+*.jpg
+*.png
+*.mp4
