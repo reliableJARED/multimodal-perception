@@ -12,7 +12,7 @@ scipy>=1.10.0
 
 # Computer Vision
 # SAM2 Model - install from GitHub
-git+https://github.com/facebookresearch/sam2.git
+#git+https://github.com/facebookresearch/sam2.git
 
 # Computer Vision
 opencv-python>=4.8.0
