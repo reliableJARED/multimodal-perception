@@ -112,7 +112,8 @@ class RealTimeDepthLayering:
         height, width = layer_mask.shape
         square_size, squares_h, squares_w, total_squares = self.calculate_optimal_grid(height, width)
         
-        points = []
+        # First pass: find all qualifying squares
+        qualifying_squares = []
         
         # Go through each square in the grid
         for row in range(squares_h):
@@ -132,12 +133,106 @@ class RealTimeDepthLayering:
                 
                 # Check if square meets the fill threshold
                 if total_pixels > 0 and (non_black_pixels / total_pixels) >= self.MIN_FILL_THRESHOLD:
-                    # Place point at center of square
                     center_y = start_y + (end_y - start_y) // 2
                     center_x = start_x + (end_x - start_x) // 2
-                    points.append((center_x, center_y))
+                    qualifying_squares.append((row, col, center_x, center_y))
+        
+        # Second pass: combine points using neighbor check
+        points = self.combine_neighboring_points(qualifying_squares, squares_h, squares_w)
         
         return points, (square_size, squares_h, squares_w, total_squares)
+    
+    def combine_neighboring_points(self, qualifying_squares, squares_h, squares_w):
+        """Simple combination: group into 3x3 windows and combine rows/columns within each group"""
+        # Create a grid to track which squares have points
+        grid = np.zeros((squares_h, squares_w), dtype=bool)
+        square_centers = {}
+        
+        # Mark qualifying squares in grid and store their centers
+        for row, col, center_x, center_y in qualifying_squares:
+            grid[row, col] = True
+            square_centers[(row, col)] = (center_x, center_y)
+        
+        # Track which squares have been processed
+        processed = np.zeros((squares_h, squares_w), dtype=bool)
+        combined_points = []
+        
+        # Process the grid in 3x3 windows
+        for window_row in range(0, squares_h, 3):
+            for window_col in range(0, squares_w, 3):
+                # Extract points in this 3x3 window
+                window_points = []
+                for r in range(window_row, min(window_row + 3, squares_h)):
+                    for c in range(window_col, min(window_col + 3, squares_w)):
+                        if grid[r, c] and not processed[r, c]:
+                            window_points.append((r, c))
+                
+                if not window_points:
+                    continue
+                
+                # Combine points within this 3x3 window
+                combined_in_window = self.combine_points_in_3x3_window(window_points, square_centers)
+                combined_points.extend(combined_in_window)
+                
+                # Mark all points in this window as processed
+                for r, c in window_points:
+                    processed[r, c] = True
+        
+        return combined_points
+    
+    def combine_points_in_3x3_window(self, window_points, square_centers):
+        """Combine points within a single 3x3 window by rows and columns"""
+        if len(window_points) <= 1:
+            # Single point or no points - just return as is
+            return [square_centers[point] for point in window_points]
+        
+        # Convert to relative coordinates within the 3x3 window
+        min_row = min(r for r, c in window_points)
+        min_col = min(c for r, c in window_points)
+        
+        # Create a 3x3 local grid
+        local_grid = {}
+        for r, c in window_points:
+            local_r = r - min_row
+            local_c = c - min_col
+            local_grid[(local_r, local_c)] = (r, c)
+        
+        # Special case: if we have a full 3x3 grid (9 points), combine to single center
+        if len(window_points) == 9 and (1, 1) in local_grid:
+            center_point = local_grid[(1, 1)]  # Center of 3x3
+            return [square_centers[center_point]]
+        
+        combined_points = []
+        used_points = set()
+        
+        # Check for 3-in-a-row (horizontal combinations)
+        for row in range(3):
+            row_points = [(row, col) for col in range(3) if (row, col) in local_grid]
+            if len(row_points) >= 3:
+                # Combine to center column (col=1)
+                original_coords = [local_grid[p] for p in row_points]
+                center_point = local_grid[(row, 1)]  # Middle of the row
+                combined_points.append(square_centers[center_point])
+                used_points.update(original_coords)
+        
+        # Check for 3-in-a-column (vertical combinations)
+        for col in range(3):
+            col_points = [(row, col) for row in range(3) if (row, col) in local_grid]
+            if len(col_points) >= 3:
+                # Combine to center row (row=1)
+                original_coords = [local_grid[p] for p in col_points]
+                # Only combine if not already used by row combination
+                if not any(coord in used_points for coord in original_coords):
+                    center_point = local_grid[(1, col)]  # Middle of the column
+                    combined_points.append(square_centers[center_point])
+                    used_points.update(original_coords)
+        
+        # Add any remaining individual points that weren't combined
+        for local_pos, original_pos in local_grid.items():
+            if original_pos not in used_points:
+                combined_points.append(square_centers[original_pos])
+        
+        return combined_points
     
     def draw_points_on_layer(self, layer_mask, points):
         """Draw points on the layer mask and return colored version"""
