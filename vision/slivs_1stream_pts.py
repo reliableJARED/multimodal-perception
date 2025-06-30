@@ -1,9 +1,6 @@
 """
-Real-time camera capture + MiDaS depth map with dynamic layered visualization + Grid-based point selection
-Displays configurable depth layers based on dynamic layer configuration
-
-https://huggingface.co/collections/Intel/dpt-31-65b2a13eb0a5a381b6df9b6b
-https://huggingface.co/Intel/dpt-swinv2-large-384
+SLIVS Depth Layer Processor - Modular Pipeline Component
+Provides depth estimation, layer creation, and point detection for SAM integration
 
 @article{DBLP:journals/corr/abs-2103-13413,
   author    = {Ren{\'{e}} Reiner Birkl, Diana Wofk, Matthias Muller},
@@ -15,7 +12,7 @@ https://huggingface.co/Intel/dpt-swinv2-large-384
   eprinttype = {arXiv},
   eprint    = {2307.14460},
   timestamp = {Wed, 26 Jul 2023},
-  biburl    = {https://dblp.org/rec/journals/corr/abs-2307.14460.bib},
+  biburl    = {https://dblp.org/rec/journals/corr/abs-2307-14460.bib},
   bibsource = {dblp computer science bibliography, https://dblp.org}
 }
 """
@@ -27,101 +24,143 @@ from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 from PIL import Image
 import time
 import math
+from typing import Dict, List, Tuple, Optional, NamedTuple
+from dataclasses import dataclass
 
-class RealTimeDepthLayering:
-    def __init__(self):
-        # Dynamic depth layer configuration - modify this dict to change layers
+@dataclass
+class DepthLayerConfig:
+    """Configuration for a single depth layer"""
+    min_depth: int
+    max_depth: int
+    label: str
+
+@dataclass
+class GridInfo:
+    """Information about the grid used for point detection"""
+    square_size: int
+    squares_height: int
+    squares_width: int
+    total_squares: int
+
+@dataclass
+class LayerResult:
+    """Result for a single depth layer"""
+    layer_mask: np.ndarray
+    points: List[Tuple[int, int]]
+    grid_info: GridInfo
+    config: DepthLayerConfig
+
+@dataclass
+class DepthProcessingResult:
+    """Complete result from depth processing"""
+    full_depth_map: np.ndarray
+    layers: List[LayerResult]
+    all_points: List[Tuple[int, int]]
+    processing_time: float
+
+class SLIVSDepthProcessor:
+    """
+    Modular depth processing class for SLIVS pipeline.
+    Handles depth estimation, layer creation, and point detection.
+    """
+    
+    def __init__(self, 
+                 model_name: str = "Intel/dpt-swinv2-tiny-256",
+                 target_squares: int = 100,
+                 min_fill_threshold: float = 0.7,
+                 device: Optional[str] = None):
+        """
+        Initialize the depth processor.
+        
+        Args:
+            model_name: MiDaS model to use
+            target_squares: Target number of grid squares for point detection
+            min_fill_threshold: Minimum fill ratio for valid squares (0.0-1.0)
+            device: Device to use ('cuda', 'cpu', or None for auto)
+        """
+        self.target_squares = target_squares
+        self.min_fill_threshold = min_fill_threshold
+        
+        # Default depth layer configuration
         self.depth_layers = {
-            "layer_1": {"min": 0, "max": 25, "label": "Furthest"},      # Furthest objects
-            "layer_2": {"min": 26, "max": 50, "label": "Far"},         # Far objects
-            "layer_3": {"min": 51, "max": 75, "label": "Mid"},         # Mid-range objects
-            "layer_4": {"min": 76, "max": 150, "label": "Near"},       # Near objects
-            "layer_5": {"min": 151, "max": 255, "label": "Closest"},   # Closest objects
+            "furthest": DepthLayerConfig(0, 25, "Furthest"),
+            "far": DepthLayerConfig(26, 50, "Far"),
+            "mid": DepthLayerConfig(51, 75, "Mid"),
+            "near": DepthLayerConfig(76, 150, "Near"),
+            "closest": DepthLayerConfig(151, 255, "Closest"),
         }
         
-        # Grid and point selection settings
-        self.TARGET_SQUARES = 100       # Target number of grid squares
-        self.MIN_FILL_THRESHOLD = 0.7  # 70% non-black pixel threshold
-        self.POINT_COLOR = (0, 255, 0) # Green points
-        self.POINT_SIZE = 3            # Point radius
-        
-        # Display settings
-        self.PANEL_WIDTH = 320   # Width of each panel
-        self.PANEL_HEIGHT = 240  # Height of each panel
-        self.FONT_SCALE = 0.6
-        self.FONT_THICKNESS = 1
-        
-        # Calculate display layout based on number of layers
-        self.num_layers = len(self.depth_layers)
-        self.total_panels = self.num_layers + 1  # +1 for full depth panel
-        self._calculate_display_layout()
-        
-        # Initialize camera
-        print("Initializing camera...")
-        self.cap = cv2.VideoCapture(0)
-        if not self.cap.isOpened():
-            raise RuntimeError("Error: Could not open camera")
-        
-        # Request camera resolution (Some cameras ignore these settings entirely)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        # Initialize device
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(device)
         
         # Load MiDaS model
-        print("Loading MiDaS model...")
-        self.model_name = "Intel/dpt-swinv2-tiny-256"  # Fast model for real-time
-        self.processor = AutoImageProcessor.from_pretrained(self.model_name)
-        self.model = AutoModelForDepthEstimation.from_pretrained(self.model_name)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Loading MiDaS model: {model_name}")
+        self.processor = AutoImageProcessor.from_pretrained(model_name)
+        self.model = AutoModelForDepthEstimation.from_pretrained(model_name)
         self.model.to(self.device).eval()
         
-        print(f"Using device: {self.device}")
-        print(f"Configured {self.num_layers} depth layers:")
-        for layer_key, config in self.depth_layers.items():
-            print(f"  {layer_key}: {config['min']}-{config['max']} ({config['label']})")
-        print(f"Display layout: {self.display_rows}x{self.display_cols}")
-        print("System ready! Press 'q' to quit")
+        print(f"SLIVS Depth Processor initialized on {self.device}")
+        print(f"Configured with {len(self.depth_layers)} depth layers")
     
-    def _calculate_display_layout(self):
-        """Calculate optimal display layout based on number of panels"""
-        # Find best rectangular layout for panels
-        best_aspect_ratio = float('inf')
-        best_rows, best_cols = 1, self.total_panels
+    def update_depth_layers(self, new_config: Dict[str, DepthLayerConfig]) -> None:
+        """
+        Update depth layer configuration.
         
-        for rows in range(1, self.total_panels + 1):
-            cols = math.ceil(self.total_panels / rows)
-            aspect_ratio = abs((cols * self.PANEL_WIDTH) / (rows * self.PANEL_HEIGHT) - 16/9)
-            if aspect_ratio < best_aspect_ratio:
-                best_aspect_ratio = aspect_ratio
-                best_rows, best_cols = rows, cols
-        
-        self.display_rows = best_rows
-        self.display_cols = best_cols
-        self.composite_height = self.PANEL_HEIGHT * self.display_rows
-        self.composite_width = self.PANEL_WIDTH * self.display_cols
-        
-        # Generate panel positions
-        self.panel_positions = []
-        for i in range(self.total_panels):
-            row = i // self.display_cols
-            col = i % self.display_cols
-            y = row * self.PANEL_HEIGHT
-            x = col * self.PANEL_WIDTH
-            self.panel_positions.append((y, x))
+        Args:
+            new_config: New depth layer configuration
+        """
+        self.depth_layers = new_config
+        print(f"Updated depth layers: {len(self.depth_layers)} layers configured")
     
-    def update_depth_layers(self, new_layers_config):
-        """Update depth layer configuration dynamically"""
-        self.depth_layers = new_layers_config
-        self.num_layers = len(self.depth_layers)
-        self.total_panels = self.num_layers + 1
-        self._calculate_display_layout()
+    def estimate_depth(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Generate depth estimation using MiDaS.
         
-        print(f"Updated to {self.num_layers} depth layers:")
-        for layer_key, config in self.depth_layers.items():
-            print(f"  {layer_key}: {config['min']}-{config['max']} ({config['label']})")
-        print(f"New display layout: {self.display_rows}x{self.display_cols}")
+        Args:
+            frame: Input RGB frame (H, W, 3)
+            
+        Returns:
+            Normalized depth map (H, W) with values 0-255
+        """
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(rgb_frame)
+        
+        inputs = self.processor(images=pil_image, return_tensors="pt")
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            predicted_depth = outputs.predicted_depth
+        
+        # Resize to original dimensions
+        height, width = frame.shape[:2]
+        prediction = torch.nn.functional.interpolate(
+            predicted_depth.unsqueeze(1),
+            size=(height, width),
+            mode="bicubic",
+            align_corners=False,
+        )
+        
+        # Convert to 0-255 range
+        depth_map = prediction.squeeze().cpu().numpy()
+        depth_normalized = cv2.normalize(depth_map, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        
+        return depth_normalized
     
-    def calculate_optimal_grid(self, height, width):
-        """Calculate optimal grid size based on GCD to get close to target squares"""
+    def calculate_optimal_grid(self, height: int, width: int) -> GridInfo:
+        """
+        Calculate optimal grid size based on GCD to get close to target squares.
+        
+        Args:
+            height: Image height
+            width: Image width
+            
+        Returns:
+            GridInfo with optimal grid parameters
+        """
         gcd = math.gcd(height, width)
         
         # Find divisors of the GCD
@@ -144,7 +183,7 @@ class RealTimeDepthLayering:
             total_squares = squares_h * squares_w
             
             # We want at least target squares but not too many more
-            if total_squares >= self.TARGET_SQUARES:
+            if total_squares >= self.target_squares:
                 if total_squares < best_squares:
                     best_squares = total_squares
                     best_divisor = divisor
@@ -152,32 +191,38 @@ class RealTimeDepthLayering:
         # If no divisor gives us enough squares, use the largest one
         if best_squares == float('inf'):
             best_divisor = divisors[-1]
-            squares_h = height // best_divisor
-            squares_w = width // best_divisor
-            best_squares = squares_h * squares_w
         
         square_size = best_divisor
         squares_h = height // square_size
         squares_w = width // square_size
+        total_squares = squares_h * squares_w
         
-        return square_size, squares_h, squares_w, best_squares
+        return GridInfo(square_size, squares_h, squares_w, total_squares)
     
-    def find_segment_points(self, layer_mask):
-        """Find points in grid squares with sufficient non-black pixels"""
+    def find_layer_points(self, layer_mask: np.ndarray) -> Tuple[List[Tuple[int, int]], GridInfo]:
+        """
+        Find points in grid squares with sufficient non-black pixels.
+        
+        Args:
+            layer_mask: Binary layer mask (H, W)
+            
+        Returns:
+            Tuple of (points_list, grid_info)
+        """
         height, width = layer_mask.shape
-        square_size, squares_h, squares_w, total_squares = self.calculate_optimal_grid(height, width)
+        grid_info = self.calculate_optimal_grid(height, width)
         
         # First pass: find all qualifying squares
         qualifying_squares = []
         
         # Go through each square in the grid
-        for row in range(squares_h):
-            for col in range(squares_w):
+        for row in range(grid_info.squares_height):
+            for col in range(grid_info.squares_width):
                 # Calculate square boundaries
-                start_y = row * square_size
-                end_y = min(start_y + square_size, height)
-                start_x = col * square_size
-                end_x = min(start_x + square_size, width)
+                start_y = row * grid_info.square_size
+                end_y = min(start_y + grid_info.square_size, height)
+                start_x = col * grid_info.square_size
+                end_x = min(start_x + grid_info.square_size, width)
                 
                 # Extract the square
                 square = layer_mask[start_y:end_y, start_x:end_x]
@@ -187,20 +232,29 @@ class RealTimeDepthLayering:
                 total_pixels = square.size
                 
                 # Check if square meets the fill threshold
-                if total_pixels > 0 and (non_black_pixels / total_pixels) >= self.MIN_FILL_THRESHOLD:
+                if total_pixels > 0 and (non_black_pixels / total_pixels) >= self.min_fill_threshold:
                     center_y = start_y + (end_y - start_y) // 2
                     center_x = start_x + (end_x - start_x) // 2
                     qualifying_squares.append((row, col, center_x, center_y))
         
         # Second pass: combine points using neighbor check
-        points = self.combine_neighboring_points(qualifying_squares, squares_h, squares_w)
+        points = self._combine_neighboring_points(qualifying_squares, grid_info)
         
-        return points, (square_size, squares_h, squares_w, total_squares)
+        return points, grid_info
     
-    def combine_neighboring_points(self, qualifying_squares, squares_h, squares_w):
-        """Simple combination: group into 3x3 windows and combine rows/columns within each group"""
+    def _combine_neighboring_points(self, qualifying_squares: List[Tuple], grid_info: GridInfo) -> List[Tuple[int, int]]:
+        """
+        Combine neighboring points using 3x3 window analysis.
+        
+        Args:
+            qualifying_squares: List of (row, col, center_x, center_y) tuples
+            grid_info: Grid information
+            
+        Returns:
+            List of combined points as (x, y) tuples
+        """
         # Create a grid to track which squares have points
-        grid = np.zeros((squares_h, squares_w), dtype=bool)
+        grid = np.zeros((grid_info.squares_height, grid_info.squares_width), dtype=bool)
         square_centers = {}
         
         # Mark qualifying squares in grid and store their centers
@@ -209,16 +263,16 @@ class RealTimeDepthLayering:
             square_centers[(row, col)] = (center_x, center_y)
         
         # Track which squares have been processed
-        processed = np.zeros((squares_h, squares_w), dtype=bool)
+        processed = np.zeros((grid_info.squares_height, grid_info.squares_width), dtype=bool)
         combined_points = []
         
         # Process the grid in 3x3 windows
-        for window_row in range(0, squares_h, 3):
-            for window_col in range(0, squares_w, 3):
+        for window_row in range(0, grid_info.squares_height, 3):
+            for window_col in range(0, grid_info.squares_width, 3):
                 # Extract points in this 3x3 window
                 window_points = []
-                for r in range(window_row, min(window_row + 3, squares_h)):
-                    for c in range(window_col, min(window_col + 3, squares_w)):
+                for r in range(window_row, min(window_row + 3, grid_info.squares_height)):
+                    for c in range(window_col, min(window_col + 3, grid_info.squares_width)):
                         if grid[r, c] and not processed[r, c]:
                             window_points.append((r, c))
                 
@@ -226,7 +280,7 @@ class RealTimeDepthLayering:
                     continue
                 
                 # Combine points within this 3x3 window
-                combined_in_window = self.combine_points_in_3x3_window(window_points, square_centers)
+                combined_in_window = self._combine_points_in_3x3_window(window_points, square_centers)
                 combined_points.extend(combined_in_window)
                 
                 # Mark all points in this window as processed
@@ -235,8 +289,17 @@ class RealTimeDepthLayering:
         
         return combined_points
     
-    def combine_points_in_3x3_window(self, window_points, square_centers):
-        """Combine points within a single 3x3 window by rows and columns"""
+    def _combine_points_in_3x3_window(self, window_points: List[Tuple], square_centers: Dict) -> List[Tuple[int, int]]:
+        """
+        Combine points within a single 3x3 window by rows and columns.
+        
+        Args:
+            window_points: Points in the 3x3 window
+            square_centers: Mapping of grid positions to center coordinates
+            
+        Returns:
+            List of combined points
+        """
         if len(window_points) <= 1:
             # Single point or no points - just return as is
             return [square_centers[point] for point in window_points]
@@ -289,110 +352,219 @@ class RealTimeDepthLayering:
         
         return combined_points
     
-    def draw_points_on_layer(self, layer_mask, points):
-        """Draw points on the layer mask and return colored version"""
-        # Convert grayscale to BGR for colored points
+    def create_layer_mask(self, depth_map: np.ndarray, config: DepthLayerConfig) -> np.ndarray:
+        """
+        Create a layer mask for a specific depth range.
+        
+        Args:
+            depth_map: Full depth map (H, W)
+            config: Layer configuration
+            
+        Returns:
+            Layer mask (H, W) with non-zero values only in the depth range
+        """
+        layer_depth = depth_map.copy()
+        mask = (layer_depth < config.min_depth) | (layer_depth > config.max_depth)
+        layer_depth[mask] = 0
+        return layer_depth
+    
+    def process_frame(self, frame: np.ndarray) -> DepthProcessingResult:
+        """
+        Process a single frame to extract depth layers and points.
+        
+        Args:
+            frame: Input RGB frame (H, W, 3)
+            
+        Returns:
+            DepthProcessingResult with all processing outputs
+        """
+        start_time = time.time()
+        
+        # Generate depth map
+        depth_map = self.estimate_depth(frame)
+        
+        # Process each depth layer
+        layers = []
+        all_points = []
+        
+        for layer_name, config in self.depth_layers.items():
+            # Create layer mask
+            layer_mask = self.create_layer_mask(depth_map, config)
+            
+            # Find points for this layer
+            points, grid_info = self.find_layer_points(layer_mask)
+            
+            # Create layer result
+            layer_result = LayerResult(
+                layer_mask=layer_mask,
+                points=points,
+                grid_info=grid_info,
+                config=config
+            )
+            
+            layers.append(layer_result)
+            all_points.extend(points)
+        
+        processing_time = time.time() - start_time
+        
+        return DepthProcessingResult(
+            full_depth_map=depth_map,
+            layers=layers,
+            all_points=all_points,
+            processing_time=processing_time
+        )
+    
+    def get_depth_map(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Get just the depth map without layer processing.
+        
+        Args:
+            frame: Input RGB frame
+            
+        Returns:
+            Depth map (H, W)
+        """
+        return self.estimate_depth(frame)
+    
+    def get_layer_masks(self, depth_map: np.ndarray) -> Dict[str, np.ndarray]:
+        """
+        Get layer masks for a given depth map.
+        
+        Args:
+            depth_map: Input depth map
+            
+        Returns:
+            Dictionary mapping layer names to masks
+        """
+        masks = {}
+        for layer_name, config in self.depth_layers.items():
+            masks[layer_name] = self.create_layer_mask(depth_map, config)
+        return masks
+    
+    def get_all_points(self, frame: np.ndarray) -> List[Tuple[int, int]]:
+        """
+        Get all points across all layers for a frame.
+        
+        Args:
+            frame: Input RGB frame
+            
+        Returns:
+            List of all points as (x, y) tuples
+        """
+        result = self.process_frame(frame)
+        return result.all_points
+    
+    def get_layer_points(self, frame: np.ndarray) -> Dict[str, List[Tuple[int, int]]]:
+        """
+        Get points organized by layer.
+        
+        Args:
+            frame: Input RGB frame
+            
+        Returns:
+            Dictionary mapping layer names to point lists
+        """
+        result = self.process_frame(frame)
+        layer_points = {}
+        for i, (layer_name, _) in enumerate(self.depth_layers.items()):
+            layer_points[layer_name] = result.layers[i].points
+        return layer_points
+
+
+# Visualization utilities (separate from core processing)
+class SLIVSVisualizer:
+    """
+    Separate visualization class for displaying SLIVS results.
+    """
+    
+    def __init__(self, panel_width: int = 320, panel_height: int = 240):
+        self.panel_width = panel_width
+        self.panel_height = panel_height
+        self.point_color = (0, 255, 0)  # Green
+        self.point_size = 3
+        self.font_scale = 0.6
+        self.font_thickness = 1
+    
+    def draw_points_on_layer(self, layer_mask: np.ndarray, points: List[Tuple[int, int]]) -> np.ndarray:
+        """Draw points on a layer mask."""
         layer_colored = cv2.cvtColor(layer_mask, cv2.COLOR_GRAY2BGR)
-        
-        # Draw points
         for point in points:
-            cv2.circle(layer_colored, point, self.POINT_SIZE, self.POINT_COLOR, -1)
-        
+            cv2.circle(layer_colored, point, self.point_size, self.point_color, -1)
         return layer_colored
     
-    def process_depth(self, frame):
-        """Process frame through MiDaS and return normalized depth map"""
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(rgb_frame)
+    def create_composite_display(self, result: DepthProcessingResult) -> np.ndarray:
+        """Create a composite display of all layers."""
+        total_panels = len(result.layers) + 1  # +1 for full depth
         
-        inputs = self.processor(images=pil_image, return_tensors="pt")
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        # Calculate layout
+        best_aspect_ratio = float('inf')
+        best_rows, best_cols = 1, total_panels
         
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            predicted_depth = outputs.predicted_depth
+        for rows in range(1, total_panels + 1):
+            cols = math.ceil(total_panels / rows)
+            aspect_ratio = abs((cols * self.panel_width) / (rows * self.panel_height) - 16/9)
+            if aspect_ratio < best_aspect_ratio:
+                best_aspect_ratio = aspect_ratio
+                best_rows, best_cols = rows, cols
         
-        # Resize to original dimensions
-        height, width = frame.shape[:2]
-        prediction = torch.nn.functional.interpolate(
-            predicted_depth.unsqueeze(1),
-            size=(height, width),
-            mode="bicubic",
-            align_corners=False,
-        )
+        composite_height = self.panel_height * best_rows
+        composite_width = self.panel_width * best_cols
+        composite = np.zeros((composite_height, composite_width, 3), dtype=np.uint8)
         
-        # Convert to 0-255 range
-        depth_map = prediction.squeeze().cpu().numpy()
-        depth_normalized = cv2.normalize(depth_map, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        
-        return depth_normalized
-    
-    def create_depth_layers(self, depth_normalized):
-        """Create dynamic depth layer masks based on configured ranges with segment points"""
-        layers = []
-        
-        for layer_key, config in self.depth_layers.items():
-            min_val = config["min"]
-            max_val = config["max"]
-            label = config["label"]
-            
-            # Create layer mask
-            layer_depth = depth_normalized.copy()
-            mask = (layer_depth < min_val) | (layer_depth > max_val)
-            layer_depth[mask] = 0
-            
-            # Find segment points for this layer
-            points, grid_info = self.find_segment_points(layer_depth)
-            
-            # Create colored version with points
-            layer_with_points = self.draw_points_on_layer(layer_depth, points)
-            
-            # Create comprehensive label
-            full_label = f"{layer_key}: {min_val}-{max_val} ({label})"
-            
-            layers.append((layer_with_points, full_label, points, grid_info))
-        
-        return layers
-    
-    def create_composite_display(self, depth_normalized, layers):
-        """Create dynamic composite display with full depth + configured layers with points"""
-        # Resize depth map to panel size and convert to BGR
-        depth_resized = cv2.resize(depth_normalized, (self.PANEL_WIDTH, self.PANEL_HEIGHT))
+        # Place full depth map
+        depth_resized = cv2.resize(result.full_depth_map, (self.panel_width, self.panel_height))
         depth_colored = cv2.cvtColor(depth_resized, cv2.COLOR_GRAY2BGR)
+        composite[0:self.panel_height, 0:self.panel_width] = depth_colored
+        cv2.putText(composite, "Full Depth", (5, 20), 
+                   cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, (255, 255, 255), self.font_thickness)
         
-        # Create composite image with calculated dimensions
-        composite = np.zeros((self.composite_height, self.composite_width, 3), dtype=np.uint8)
-        
-        # Place full depth map (first position)
-        row, col = self.panel_positions[0]
-        composite[row:row+self.PANEL_HEIGHT, col:col+self.PANEL_WIDTH] = depth_colored
-        cv2.putText(composite, "Full Depth", (col + 5, row + 20), 
-                   cv2.FONT_HERSHEY_SIMPLEX, self.FONT_SCALE, (255, 255, 255), self.FONT_THICKNESS)
-        
-        # Place depth layers with points
-        for i, ((layer_with_points, label, points, grid_info), (row, col)) in enumerate(zip(layers, self.panel_positions[1:])):
-            # Resize layer to panel size
-            layer_resized = cv2.resize(layer_with_points, (self.PANEL_WIDTH, self.PANEL_HEIGHT))
+        # Place layers
+        panel_idx = 1
+        for layer in result.layers:
+            row = panel_idx // best_cols
+            col = panel_idx % best_cols
+            y = row * self.panel_height
+            x = col * self.panel_width
             
-            # Place layer in composite
-            composite[row:row+self.PANEL_HEIGHT, col:col+self.PANEL_WIDTH] = layer_resized
+            # Draw layer with points
+            layer_with_points = self.draw_points_on_layer(layer.layer_mask, layer.points)
+            layer_resized = cv2.resize(layer_with_points, (self.panel_width, self.panel_height))
             
-            # Add label with point count
-            point_count = len(points)
-            square_size, squares_h, squares_w, total_squares = grid_info
-            label_with_info = f"{label} ({point_count}pts)"
-            cv2.putText(composite, label_with_info, (col + 5, row + 20), 
-                       cv2.FONT_HERSHEY_SIMPLEX, self.FONT_SCALE, (255, 255, 255), self.FONT_THICKNESS)
+            composite[y:y+self.panel_height, x:x+self.panel_width] = layer_resized
             
-            # Add grid info
-            grid_info_text = f"Grid:{squares_h}x{squares_w} ({total_squares})"
-            cv2.putText(composite, grid_info_text, (col + 5, row + 35), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+            # Add labels
+            label = f"{layer.config.label} ({len(layer.points)}pts)"
+            cv2.putText(composite, label, (x + 5, y + 20), 
+                       cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, (255, 255, 255), self.font_thickness)
+            
+            panel_idx += 1
         
         return composite
+
+
+# Demo/testing class
+class SLIVSDemo:
+    """
+    Demo class for testing the modular SLIVS processor.
+    """
     
-    def run(self):
-        """Main real-time processing loop"""
+    def __init__(self, processor: SLIVSDepthProcessor, visualizer: SLIVSVisualizer):
+        self.processor = processor
+        self.visualizer = visualizer
+        self.cap = None
+    
+    def run_camera_demo(self):
+        """Run live camera demo."""
+        print("Starting SLIVS camera demo...")
+        
+        # Initialize camera
+        self.cap = cv2.VideoCapture(0)
+        if not self.cap.isOpened():
+            raise RuntimeError("Could not open camera")
+        
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        
         frame_count = 0
         fps_start_time = time.time()
         current_fps = 0.0
@@ -404,61 +576,63 @@ class RealTimeDepthLayering:
                     print("Failed to capture frame")
                     break
                 
-                # Process depth
-                depth_normalized = self.process_depth(frame)
+                # Process frame
+                result = self.processor.process_frame(frame)
                 
-                # Create depth layers with segment points
-                layers = self.create_depth_layers(depth_normalized)
+                # Create visualization
+                composite = self.visualizer.create_composite_display(result)
                 
-                # Create composite display
-                composite = self.create_composite_display(depth_normalized, layers)
-                
-                # Calculate and display FPS
+                # Calculate FPS
                 frame_count += 1
-                if frame_count % 30 == 0:  # Update FPS every 30 frames
+                if frame_count % 30 == 0:
                     current_fps = 30 / (time.time() - fps_start_time)
                     fps_start_time = time.time()
                     
-                    # Print detailed info every 30 frames
-                    total_points = sum(len(layer[2]) for layer in layers)
-                    print(f"FPS: {current_fps:.1f}, Total Points: {total_points}, Layers: {self.num_layers}")
+                    total_points = len(result.all_points)
+                    print(f"FPS: {current_fps:.1f}, Processing: {result.processing_time*1000:.1f}ms, "
+                          f"Total Points: {total_points}")
                 
-                # Add FPS and layer count to display
-                cv2.putText(composite, f"FPS: {current_fps:.1f} | Layers: {self.num_layers}", 
-                           (composite.shape[1] - 200, 30), 
+                # Add FPS to display
+                cv2.putText(composite, f"FPS: {current_fps:.1f}", 
+                           (composite.shape[1] - 150, 30), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                 
-                # Display composite
-                cv2.imshow('Real-time Dynamic Depth Layers with Segment Points', composite)
+                cv2.imshow('SLIVS Modular Demo', composite)
                 
-                # Handle key presses
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
+                if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
-                
+                    
         except KeyboardInterrupt:
-            print("Interrupted by user")
-        
+            print("Demo interrupted by user")
         finally:
             self.cleanup()
     
     def cleanup(self):
-        """Clean up resources"""
-        self.cap.release()
+        """Clean up resources."""
+        if self.cap:
+            self.cap.release()
         cv2.destroyAllWindows()
-        print("Cleanup complete")
+        print("Demo cleanup complete")
+
 
 def main():
-    print("=== Real-time MiDaS Dynamic Depth Layering with Segment Points ===")
-    print("Dynamic layer configuration with grid-based point selection")
-    print("Press 'q' to quit")
+    """Main demo function."""
+    print("=== SLIVS Modular Depth Processor Demo ===")
     
-    try:
-        depth_system = RealTimeDepthLayering()
-        depth_system.run()
-    except Exception as e:
-        print(f"Error: {e}")
-        return
+    # Initialize processor
+    processor = SLIVSDepthProcessor(
+        model_name="Intel/dpt-swinv2-tiny-256",
+        target_squares=100,
+        min_fill_threshold=0.7
+    )
+    
+    # Initialize visualizer
+    visualizer = SLIVSVisualizer()
+    
+    # Run demo
+    demo = SLIVSDemo(processor, visualizer)
+    demo.run_camera_demo()
+
 
 if __name__ == "__main__":
     main()
