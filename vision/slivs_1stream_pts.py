@@ -1,13 +1,23 @@
 """
-Real-time camera capture + MiDaS depth map with layered visualization + Grid-based point selection
-Displays 6-panel window (3x2) showing full depth + 5 depth layers with segment points in real-time
+Real-time camera capture + MiDaS depth map with dynamic layered visualization + Grid-based point selection
+Displays configurable depth layers based on dynamic layer configuration
 
 https://huggingface.co/collections/Intel/dpt-31-65b2a13eb0a5a381b6df9b6b
 https://huggingface.co/Intel/dpt-swinv2-large-384
 
-Controls:
-- Press 'q' to quit
-- Press 's' to save current composite frame
+@article{DBLP:journals/corr/abs-2103-13413,
+  author    = {Ren{\'{e}} Reiner Birkl, Diana Wofk, Matthias Muller},
+  title     = {MiDaS v3.1 - A Model Zoo for Robust Monocular Relative Depth Estimation},
+  journal   = {CoRR},
+  volume    = {abs/2307.14460},
+  year      = {2021},
+  url       = {https://arxiv.org/abs/2307.14460},
+  eprinttype = {arXiv},
+  eprint    = {2307.14460},
+  timestamp = {Wed, 26 Jul 2023},
+  biburl    = {https://dblp.org/rec/journals/corr/abs-2307.14460.bib},
+  bibsource = {dblp computer science bibliography, https://dblp.org}
+}
 """
 
 import cv2
@@ -20,17 +30,14 @@ import math
 
 class RealTimeDepthLayering:
     def __init__(self):
-        # Easy to modify constants at the top of __init__
-        self.DEPTH_LAYER_1_MIN = 0     # Furthest objects  
-        self.DEPTH_LAYER_1_MAX = 25    # (0-25)
-        self.DEPTH_LAYER_2_MIN = 26    # (26-50)
-        self.DEPTH_LAYER_2_MAX = 50
-        self.DEPTH_LAYER_3_MIN = 51    # (51-75)
-        self.DEPTH_LAYER_3_MAX = 75
-        self.DEPTH_LAYER_4_MIN = 76    # (76-150)
-        self.DEPTH_LAYER_4_MAX = 150
-        self.DEPTH_LAYER_5_MIN = 151   # Closest objects
-        self.DEPTH_LAYER_5_MAX = 255   # (151-255)
+        # Dynamic depth layer configuration - modify this dict to change layers
+        self.depth_layers = {
+            "layer_1": {"min": 0, "max": 25, "label": "Furthest"},      # Furthest objects
+            "layer_2": {"min": 26, "max": 50, "label": "Far"},         # Far objects
+            "layer_3": {"min": 51, "max": 75, "label": "Mid"},         # Mid-range objects
+            "layer_4": {"min": 76, "max": 150, "label": "Near"},       # Near objects
+            "layer_5": {"min": 151, "max": 255, "label": "Closest"},   # Closest objects
+        }
         
         # Grid and point selection settings
         self.TARGET_SQUARES = 100       # Target number of grid squares
@@ -44,13 +51,18 @@ class RealTimeDepthLayering:
         self.FONT_SCALE = 0.6
         self.FONT_THICKNESS = 1
         
+        # Calculate display layout based on number of layers
+        self.num_layers = len(self.depth_layers)
+        self.total_panels = self.num_layers + 1  # +1 for full depth panel
+        self._calculate_display_layout()
+        
         # Initialize camera
         print("Initializing camera...")
         self.cap = cv2.VideoCapture(0)
         if not self.cap.isOpened():
             raise RuntimeError("Error: Could not open camera")
         
-        # Set camera resolution (optional - adjust as needed)
+        # Request camera resolution (Some cameras ignore these settings entirely)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         
@@ -63,7 +75,50 @@ class RealTimeDepthLayering:
         self.model.to(self.device).eval()
         
         print(f"Using device: {self.device}")
-        print("System ready! Press 'q' to quit, 's' to save frame")
+        print(f"Configured {self.num_layers} depth layers:")
+        for layer_key, config in self.depth_layers.items():
+            print(f"  {layer_key}: {config['min']}-{config['max']} ({config['label']})")
+        print(f"Display layout: {self.display_rows}x{self.display_cols}")
+        print("System ready! Press 'q' to quit")
+    
+    def _calculate_display_layout(self):
+        """Calculate optimal display layout based on number of panels"""
+        # Find best rectangular layout for panels
+        best_aspect_ratio = float('inf')
+        best_rows, best_cols = 1, self.total_panels
+        
+        for rows in range(1, self.total_panels + 1):
+            cols = math.ceil(self.total_panels / rows)
+            aspect_ratio = abs((cols * self.PANEL_WIDTH) / (rows * self.PANEL_HEIGHT) - 16/9)
+            if aspect_ratio < best_aspect_ratio:
+                best_aspect_ratio = aspect_ratio
+                best_rows, best_cols = rows, cols
+        
+        self.display_rows = best_rows
+        self.display_cols = best_cols
+        self.composite_height = self.PANEL_HEIGHT * self.display_rows
+        self.composite_width = self.PANEL_WIDTH * self.display_cols
+        
+        # Generate panel positions
+        self.panel_positions = []
+        for i in range(self.total_panels):
+            row = i // self.display_cols
+            col = i % self.display_cols
+            y = row * self.PANEL_HEIGHT
+            x = col * self.PANEL_WIDTH
+            self.panel_positions.append((y, x))
+    
+    def update_depth_layers(self, new_layers_config):
+        """Update depth layer configuration dynamically"""
+        self.depth_layers = new_layers_config
+        self.num_layers = len(self.depth_layers)
+        self.total_panels = self.num_layers + 1
+        self._calculate_display_layout()
+        
+        print(f"Updated to {self.num_layers} depth layers:")
+        for layer_key, config in self.depth_layers.items():
+            print(f"  {layer_key}: {config['min']}-{config['max']} ({config['label']})")
+        print(f"New display layout: {self.display_rows}x{self.display_cols}")
     
     def calculate_optimal_grid(self, height, width):
         """Calculate optimal grid size based on GCD to get close to target squares"""
@@ -88,7 +143,7 @@ class RealTimeDepthLayering:
             squares_w = width // divisor
             total_squares = squares_h * squares_w
             
-            # We want at least 20 squares but not too many more
+            # We want at least target squares but not too many more
             if total_squares >= self.TARGET_SQUARES:
                 if total_squares < best_squares:
                     best_squares = total_squares
@@ -273,17 +328,14 @@ class RealTimeDepthLayering:
         return depth_normalized
     
     def create_depth_layers(self, depth_normalized):
-        """Create 5 depth layer masks based on defined ranges with segment points"""
+        """Create dynamic depth layer masks based on configured ranges with segment points"""
         layers = []
-        layer_configs = [
-            (self.DEPTH_LAYER_1_MIN, self.DEPTH_LAYER_1_MAX, f"Layer 1: {self.DEPTH_LAYER_1_MIN}-{self.DEPTH_LAYER_1_MAX}"),
-            (self.DEPTH_LAYER_2_MIN, self.DEPTH_LAYER_2_MAX, f"Layer 2: {self.DEPTH_LAYER_2_MIN}-{self.DEPTH_LAYER_2_MAX}"),
-            (self.DEPTH_LAYER_3_MIN, self.DEPTH_LAYER_3_MAX, f"Layer 3: {self.DEPTH_LAYER_3_MIN}-{self.DEPTH_LAYER_3_MAX}"),
-            (self.DEPTH_LAYER_4_MIN, self.DEPTH_LAYER_4_MAX, f"Layer 4: {self.DEPTH_LAYER_4_MIN}-{self.DEPTH_LAYER_4_MAX}"),
-            (self.DEPTH_LAYER_5_MIN, self.DEPTH_LAYER_5_MAX, f"Layer 5: {self.DEPTH_LAYER_5_MIN}-{self.DEPTH_LAYER_5_MAX}")
-        ]
         
-        for min_val, max_val, label in layer_configs:
+        for layer_key, config in self.depth_layers.items():
+            min_val = config["min"]
+            max_val = config["max"]
+            label = config["label"]
+            
             # Create layer mask
             layer_depth = depth_normalized.copy()
             mask = (layer_depth < min_val) | (layer_depth > max_val)
@@ -295,39 +347,30 @@ class RealTimeDepthLayering:
             # Create colored version with points
             layer_with_points = self.draw_points_on_layer(layer_depth, points)
             
-            layers.append((layer_with_points, label, points, grid_info))
+            # Create comprehensive label
+            full_label = f"{layer_key}: {min_val}-{max_val} ({label})"
+            
+            layers.append((layer_with_points, full_label, points, grid_info))
         
         return layers
     
     def create_composite_display(self, depth_normalized, layers):
-        """Create 3x2 composite display with full depth + 5 layers with points"""
+        """Create dynamic composite display with full depth + configured layers with points"""
         # Resize depth map to panel size and convert to BGR
         depth_resized = cv2.resize(depth_normalized, (self.PANEL_WIDTH, self.PANEL_HEIGHT))
         depth_colored = cv2.cvtColor(depth_resized, cv2.COLOR_GRAY2BGR)
         
-        # Create composite image: 2 rows x 3 columns
-        composite_height = self.PANEL_HEIGHT * 2
-        composite_width = self.PANEL_WIDTH * 3
-        composite = np.zeros((composite_height, composite_width, 3), dtype=np.uint8)
+        # Create composite image with calculated dimensions
+        composite = np.zeros((self.composite_height, self.composite_width, 3), dtype=np.uint8)
         
-        # Panel positions (row, col)
-        positions = [
-            (0, 0),                              # Full depth - top left
-            (0, self.PANEL_WIDTH),               # Layer 1 - top middle  
-            (0, self.PANEL_WIDTH * 2),           # Layer 2 - top right
-            (self.PANEL_HEIGHT, 0),              # Layer 3 - bottom left
-            (self.PANEL_HEIGHT, self.PANEL_WIDTH), # Layer 4 - bottom middle
-            (self.PANEL_HEIGHT, self.PANEL_WIDTH * 2) # Layer 5 - bottom right
-        ]
-        
-        # Place full depth map (top-left)
-        row, col = positions[0]
+        # Place full depth map (first position)
+        row, col = self.panel_positions[0]
         composite[row:row+self.PANEL_HEIGHT, col:col+self.PANEL_WIDTH] = depth_colored
         cv2.putText(composite, "Full Depth", (col + 5, row + 20), 
                    cv2.FONT_HERSHEY_SIMPLEX, self.FONT_SCALE, (255, 255, 255), self.FONT_THICKNESS)
         
         # Place depth layers with points
-        for i, ((layer_with_points, label, points, grid_info), (row, col)) in enumerate(zip(layers, positions[1:])):
+        for i, ((layer_with_points, label, points, grid_info), (row, col)) in enumerate(zip(layers, self.panel_positions[1:])):
             # Resize layer to panel size
             layer_resized = cv2.resize(layer_with_points, (self.PANEL_WIDTH, self.PANEL_HEIGHT))
             
@@ -347,13 +390,6 @@ class RealTimeDepthLayering:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
         
         return composite
-    
-    def save_current_frame(self, composite):
-        """Save current composite frame"""
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        filename = f"depth_layers_points_{timestamp}.jpg"
-        cv2.imwrite(filename, composite)
-        print(f"Frame saved as: {filename}")
     
     def run(self):
         """Main real-time processing loop"""
@@ -385,22 +421,20 @@ class RealTimeDepthLayering:
                     
                     # Print detailed info every 30 frames
                     total_points = sum(len(layer[2]) for layer in layers)
-                    print(f"FPS: {current_fps:.1f}, Total Points: {total_points}")
+                    print(f"FPS: {current_fps:.1f}, Total Points: {total_points}, Layers: {self.num_layers}")
                 
-                # Add FPS to display
-                cv2.putText(composite, f"FPS: {current_fps:.1f}", 
-                           (composite.shape[1] - 100, 30), 
+                # Add FPS and layer count to display
+                cv2.putText(composite, f"FPS: {current_fps:.1f} | Layers: {self.num_layers}", 
+                           (composite.shape[1] - 200, 30), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                 
                 # Display composite
-                cv2.imshow('Real-time Depth Layers with Segment Points', composite)
+                cv2.imshow('Real-time Dynamic Depth Layers with Segment Points', composite)
                 
                 # Handle key presses
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q'):
                     break
-                elif key == ord('s'):
-                    self.save_current_frame(composite)
                 
         except KeyboardInterrupt:
             print("Interrupted by user")
@@ -415,8 +449,9 @@ class RealTimeDepthLayering:
         print("Cleanup complete")
 
 def main():
-    print("=== Real-time MiDaS Depth Layering with Segment Points ===")
-    print("Grid-based point selection: ~20 squares target, 70% fill threshold")
+    print("=== Real-time MiDaS Dynamic Depth Layering with Segment Points ===")
+    print("Dynamic layer configuration with grid-based point selection")
+    print("Press 'q' to quit")
     
     try:
         depth_system = RealTimeDepthLayering()
