@@ -64,6 +64,6 @@ torch_cache/
 node_modules/
 
 #Testing Results
-*.jpg
+#*.jpg
 #*.png
 *.mp4
