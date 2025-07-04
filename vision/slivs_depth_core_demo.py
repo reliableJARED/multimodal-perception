@@ -26,7 +26,7 @@ import time
 import math
 from typing import Dict, List, Tuple, Optional, NamedTuple
 from dataclasses import dataclass
-from slivs_depth_core import SLIVSDepthProcessor, DepthProcessingResult
+from slivs_depth_core import SLIVSDepthProcessor, DepthProcessingResult, DepthLayerConfig
 
 
 
@@ -54,6 +54,7 @@ class SLIVSVisualizer:
     def create_composite_display(self, result: DepthProcessingResult) -> np.ndarray:
         """Create a composite display of all layers."""
         total_panels = len(result.layers) + 1  # +1 for full depth
+
         
         # Calculate layout
         best_aspect_ratio = float('inf')
@@ -135,6 +136,10 @@ class SLIVSDemo:
                     print("Failed to capture frame")
                     break
                 
+                #uncomment when using the synchronized dual-camera
+                height, width = frame.shape[:2] #get frame shape
+                frame = frame[:, :width//2] # Keep all rows, crop columns 0-1279, so we only use the 'right' camera on the synchronized dual-cam rig
+
                 # Process frame
                 result = self.processor.process_frame(frame)
                 
@@ -184,7 +189,19 @@ def main():
         target_squares=100,
         min_fill_threshold=0.7
     )
-    
+
+    #Overide default 5 depth layers
+    # Default depth layer configuration
+    depth_layers = {
+            "furthest": DepthLayerConfig(0, 36, "Furthest"),
+            "far": DepthLayerConfig(37, 73, "Far"),
+            "lessfar": DepthLayerConfig(74, 109, "Less Far"),
+            "mid": DepthLayerConfig(110, 145, "Mid"),
+            "midnear": DepthLayerConfig(146, 181, "Mid Near"),
+            "close": DepthLayerConfig(182, 217, "Close"),
+            "closest": DepthLayerConfig(218, 255, "Closest"),
+        }
+    processor.update_depth_layers(depth_layers)
     # Initialize visualizer
     visualizer = SLIVSVisualizer()
     

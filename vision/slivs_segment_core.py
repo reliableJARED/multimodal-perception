@@ -33,7 +33,7 @@ class SAM2Config:
     checkpoint_dir: str = "./models/checkpoints"
     device: Optional[str] = None
     multimask_output: bool = True
-    min_mask_confidence: float = 0.5
+    min_mask_confidence: float = 0.5 #if No mask at this level nothing is returned.
     use_highest_confidence: bool = True
 
 
@@ -72,7 +72,12 @@ class SLIVSSam2Processor:
         Args:
             config: SAM2 configuration object
         """
-        self.config = config if config else SAM2Config()
+        if config is None:
+            print(f"SLIVSSam2Processor instance using default configuration SAM2Config")
+            self.config = SAM2Config()
+        else:
+            print(f"SLIVSSam2Processor instance using custom configuration SAM2Config")
+            self.config = config
         
         # Model URLs for downloading
         self.model_urls = {

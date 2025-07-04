@@ -1,0 +1,228 @@
+SLIVS Enhanced Results (Depth-Aware Segmentation) - 20250704_141804
+================================================================================
+
+ENHANCEMENTS:
+  - Depth-aware pixel masking for SAM2 segmentation
+  - Layer-specific image constraints prevent false connections
+  - Depth constraint visualizations saved for debugging
+
+DEPTH PROCESSING SUMMARY:
+  Total points detected: 84
+  Depth processing time: 0.194s
+
+DEPTH LAYERS:
+  Layer 0 - Furthest: 34 points (depth range: 0-36)
+  Layer 1 - Far: 14 points (depth range: 37-73)
+  Layer 2 - Less Far: 5 points (depth range: 74-109)
+  Layer 3 - Mid: 1 points (depth range: 110-145)
+  Layer 4 - Mid Near: 6 points (depth range: 146-181)
+  Layer 5 - Close: 19 points (depth range: 182-217)
+  Layer 6 - Closest: 5 points (depth range: 218-255)
+
+SEGMENTED OBJECTS (using depth-aware segmentation):
+Object: Furthest_0
+  Depth Layer: Furthest
+  Confidence: 0.900
+  Area: 46643 pixels
+  Centroid: (129.6, 91.6)
+  Points (12): [(100, 60), (60, 100), (100, 100), (180, 60), (220, 20), (140, 60), (140, 100), (300, 20), (340, 60), (340, 100), (100, 140), (180, 140)]
+
+Object: Furthest_1
+  Depth Layer: Furthest
+  Confidence: 0.941
+  Area: 11868 pixels
+  Centroid: (503.8, 41.7)
+  Points (16): [(420, 60), (540, 60), (620, 100), (340, 140), (340, 180), (380, 180), (420, 180), (540, 180), (580, 180), (620, 180), (420, 260), (540, 300), (540, 260), (580, 260), (620, 260), (620, 300)]
+
+Object: Furthest_2
+  Depth Layer: Furthest
+  Confidence: 0.201
+  Area: 4445 pixels
+  Centroid: (608.7, 32.7)
+  Points (1): [(620, 60)]
+
+Object: Furthest_3
+  Depth Layer: Furthest
+  Confidence: 0.896
+  Area: 45620 pixels
+  Centroid: (125.2, 93.3)
+  Points (3): [(60, 140), (60, 180), (100, 180)]
+
+Object: Furthest_4
+  Depth Layer: Furthest
+  Confidence: 0.875
+  Area: 48351 pixels
+  Centroid: (134.4, 91.0)
+  Points (2): [(140, 180), (180, 180)]
+
+Object: Far_0
+  Depth Layer: Far
+  Confidence: 0.831
+  Area: 50037 pixels
+  Centroid: (143.7, 89.1)
+  Points (5): [(60, 20), (20, 60), (60, 60), (20, 100), (140, 20)]
+
+Object: Far_1
+  Depth Layer: Far
+  Confidence: 0.550
+  Area: 1077 pixels
+  Centroid: (66.0, 218.2)
+  Points (2): [(20, 180), (60, 220)]
+
+Object: Far_2
+  Depth Layer: Far
+  Confidence: 0.614
+  Area: 28147 pixels
+  Centroid: (56.9, 359.8)
+  Points (4): [(60, 300), (140, 260), (60, 380), (60, 420)]
+
+Object: Far_3
+  Depth Layer: Far
+  Confidence: 0.535
+  Area: 25007 pixels
+  Centroid: (531.4, 374.9)
+  Points (2): [(460, 380), (540, 380)]
+
+Object: Far_4
+  Depth Layer: Far
+  Confidence: 0.551
+  Area: 10389 pixels
+  Centroid: (500.2, 452.0)
+  Points (1): [(540, 420)]
+
+Object: Less Far_0
+  Depth Layer: Less Far
+  Confidence: 0.600
+  Area: 39459 pixels
+  Centroid: (62.8, 327.7)
+  Points (1): [(60, 460)]
+
+Object: Less Far_1
+  Depth Layer: Less Far
+  Confidence: 0.790
+  Area: 2879 pixels
+  Centroid: (417.1, 459.4)
+  Points (1): [(420, 460)]
+
+Object: Less Far_2
+  Depth Layer: Less Far
+  Confidence: 0.500
+  Area: 9844 pixels
+  Centroid: (498.2, 454.2)
+  Points (1): [(540, 460)]
+
+Object: Less Far_3
+  Depth Layer: Less Far
+  Confidence: 0.846
+  Area: 2331 pixels
+  Centroid: (621.0, 390.5)
+  Points (2): [(620, 380), (620, 420)]
+
+Object: Mid_0
+  Depth Layer: Mid
+  Confidence: 0.422
+  Area: 4126 pixels
+  Centroid: (618.9, 417.7)
+  Points (1): [(620, 460)]
+
+Object: Mid Near_0
+  Depth Layer: Mid Near
+  Confidence: 0.917
+  Area: 12465 pixels
+  Centroid: (263.9, 128.6)
+  Points (2): [(260, 60), (260, 100)]
+
+Object: Mid Near_1
+  Depth Layer: Mid Near
+  Confidence: 0.725
+  Area: 44217 pixels
+  Centroid: (287.5, 319.0)
+  Points (2): [(340, 260), (380, 300)]
+
+Object: Mid Near_2
+  Depth Layer: Mid Near
+  Confidence: 0.957
+  Area: 3549 pixels
+  Centroid: (430.4, 425.9)
+  Points (2): [(380, 420), (420, 420)]
+
+Object: Close_0
+  Depth Layer: Close
+  Confidence: 0.842
+  Area: 12435 pixels
+  Centroid: (263.6, 129.5)
+  Points (1): [(260, 180)]
+
+Object: Close_1
+  Depth Layer: Close
+  Confidence: 0.284
+  Area: 391 pixels
+  Centroid: (243.8, 214.6)
+  Points (1): [(260, 220)]
+
+Object: Close_2
+  Depth Layer: Close
+  Confidence: 0.555
+  Area: 9980 pixels
+  Centroid: (472.9, 214.0)
+  Points (3): [(460, 220), (460, 260), (460, 300)]
+
+Object: Close_3
+  Depth Layer: Close
+  Confidence: 0.308
+  Area: 78 pixels
+  Centroid: (494.7, 217.1)
+  Points (1): [(500, 220)]
+
+Object: Close_4
+  Depth Layer: Close
+  Confidence: 0.298
+  Area: 2448 pixels
+  Centroid: (168.9, 312.9)
+  Points (1): [(180, 300)]
+
+Object: Close_5
+  Depth Layer: Close
+  Confidence: 0.215
+  Area: 6551 pixels
+  Centroid: (193.0, 276.3)
+  Points (1): [(220, 300)]
+
+Object: Close_6
+  Depth Layer: Close
+  Confidence: 0.814
+  Area: 35104 pixels
+  Centroid: (308.3, 323.5)
+  Points (10): [(300, 340), (260, 260), (300, 260), (260, 300), (300, 300), (300, 380), (300, 420), (340, 420), (340, 460), (420, 380)]
+
+Object: Close_7
+  Depth Layer: Close
+  Confidence: 0.562
+  Area: 4224 pixels
+  Centroid: (444.2, 313.2)
+  Points (1): [(420, 340)]
+
+Object: Closest_0
+  Depth Layer: Closest
+  Confidence: 0.891
+  Area: 14496 pixels
+  Centroid: (228.1, 414.0)
+  Points (5): [(220, 420), (220, 460), (260, 420), (260, 460), (300, 460)]
+
+SUMMARY:
+  Total Objects: 27
+  Depth Layers Used: 7/7
+  Furthest: 5 objects
+  Far: 5 objects
+  Less Far: 4 objects
+  Mid: 1 objects
+  Mid Near: 3 objects
+  Close: 8 objects
+  Closest: 1 objects
+
+OUTPUT FILES:
+  Segmentation View: slivs_segmentation_20250704_141804.jpg
+  Depth Layers View: slivs_depth_layers_20250704_141804.jpg
+  Original Frame: original_frame_20250704_141804.jpg
+  Raw Depth Map: depth_map_20250704_141804.png
+  Depth Constraint Visualizations: depth_constraint_*.jpg
