@@ -43,20 +43,10 @@ class SegmentResult:
     segment_id: str
     mask: np.ndarray
     confidence: float
-    point_prompt: Tuple[int, int]
+    point_prompt: List[Tuple[int, int]]
     bounding_box: Tuple[int, int, int, int]  # [x1, y1, x2, y2]
     area: int
     logits: Optional[np.ndarray] = None
-
-
-@dataclass
-class SAM2ProcessingResult:
-    """Complete result from SAM2 processing"""
-    segments: List[SegmentResult]
-    all_masks: np.ndarray  # Combined masks for all segments
-    point_prompts: List[Tuple[int, int]]
-    processing_time: float
-    frame_shape: Tuple[int, int]  # [height, width]
 
 
 class SLIVSSam2Processor:
@@ -170,15 +160,19 @@ class SLIVSSam2Processor:
         self.current_frame = rgb_frame
         self.predictor.set_image(rgb_frame)
     
-    def segment_from_point(self, point: Tuple[int, int], 
-                          label: int = 1) -> SegmentResult:
+    def segment_from_point(self, points: List[Tuple[int, int]], 
+                           labels: Optional[List[int]] = None) -> SegmentResult:
+        
+        # TODO: Implement bounding box prompting
+
         """
-        Generate segmentation for a single point prompt.
-        Returns the highest confidence mask when multimask_output=True.
+        Generate segmentation from one or multiple point prompts (of same segment).
+        Returns the highest confidence mask when multimask_output=True (default).
         
         Args:
-            point: Point coordinates (x, y)
-            label: Point label (1 = positive, 0 = negative)
+            points: Point coordinates (x, y) or list of points [(x1, y1), (x2, y2), ...]
+            labels: Point label(s) 1 = positive (include this in the segment)
+                                   0 = negative (exclude this from the segment)
             
         Returns:
             SegmentResult with the best mask for the point
@@ -186,8 +180,12 @@ class SLIVSSam2Processor:
         if self.current_frame is None:
             raise RuntimeError("No image set. Call set_image() first.")
         
-        input_points = np.array([point])
-        input_labels = np.array([label])
+        # Set default labels if not provided
+        if labels is None:
+            labels = [1] * len(points)
+        
+        input_points = np.array(points)
+        input_labels = np.array(labels)
         
         # Run segmentation
         with torch.inference_mode():
@@ -223,78 +221,16 @@ class SLIVSSam2Processor:
             segment_id=str(uuid.uuid4()),
             mask=best_mask,
             confidence=float(best_score),
-            point_prompt=point,
+            point_prompt=points,
             bounding_box=bbox,
             area=int(area),
             logits=best_logits
         )
     
-    def segment_from_points(self, points: List[Tuple[int, int]], 
-                           labels: Optional[List[int]] = None) -> SAM2ProcessingResult:
-        """
-        Generate segmentation for multiple point prompts.
-        
-        Args:
-            points: List of point coordinates [(x1, y1), (x2, y2), ...]
-            labels: List of point labels (1 = positive, 0 = negative). 
-                   If None, all points are treated as positive.
-            
-        Returns:
-            SAM2ProcessingResult with all segments
-        """
-        if self.current_frame is None:
-            raise RuntimeError("No image set. Call set_image() first.")
-        
-        if not points:
-            return SAM2ProcessingResult(
-                segments=[],
-                all_masks=np.zeros(self.current_frame.shape[:2], dtype=bool),
-                point_prompts=[],
-                processing_time=0.0,
-                frame_shape=self.current_frame.shape[:2]
-            )
-        
-        start_time = time.time()
-        
-        # Set default labels if not provided
-        if labels is None:
-            labels = [1] * len(points)
-        
-        segments = []
-        all_masks = np.zeros(self.current_frame.shape[:2], dtype=bool)
-        
-        # Process each point
-        for point, label in zip(points, labels):
-            try:
-                segment = self.segment_from_point(point, label)
-                
-                # Only include segments above confidence threshold
-                if segment.confidence >= self.config.min_mask_confidence:
-                    segments.append(segment)
-                    all_masks = all_masks | segment.mask.astype(bool)
-                    
-            except Exception as e:
-                print(f"Warning: Failed to segment point {point}: {e}")
-                continue
-        
-        processing_time = time.time() - start_time
-        
-        return SAM2ProcessingResult(
-            segments=segments,
-            all_masks=all_masks,
-            point_prompts=points,
-            processing_time=processing_time,
-            frame_shape=self.current_frame.shape[:2]
-        )
     
-    # TODO: Implement multipoint prompting (multiple points per segment)
-
-    # TODO: Implement automatic segmentation (segment everything)
-
-    # TODO: Implement bounding box prompting
 
     def _calculate_bounding_box(self, mask: np.ndarray) -> Tuple[int, int, int, int]:
-        """Calculate bounding box for a mask."""
+        """Calculate bounding box for a segment mask."""
         if not np.any(mask):
             return (0, 0, 0, 0)
         
@@ -306,42 +242,4 @@ class SLIVSSam2Processor:
         
         return (int(x1), int(y1), int(x2), int(y2))
     
-    def get_segment_by_id(self, segment_id: str, 
-                         segments: List[SegmentResult]) -> Optional[SegmentResult]:
-        """Get a segment by its ID."""
-        for segment in segments:
-            if segment.segment_id == segment_id:
-                return segment
-        return None
     
-    def filter_segments_by_area(self, segments: List[SegmentResult], 
-                               min_area: int = 100, 
-                               max_area: Optional[int] = None) -> List[SegmentResult]:
-        """Filter segments by area constraints."""
-        filtered = []
-        for segment in segments:
-            if segment.area >= min_area:
-                if max_area is None or segment.area <= max_area:
-                    filtered.append(segment)
-        return filtered
-    
-    def filter_segments_by_confidence(self, segments: List[SegmentResult], 
-                                    min_confidence: float = 0.5) -> List[SegmentResult]:
-        """Filter segments by confidence threshold."""
-        return [seg for seg in segments if seg.confidence >= min_confidence]
-    
-    def update_config(self, new_config: SAM2Config):
-        """
-        Update configuration and reload model if necessary.
-        
-        Args:
-            new_config: New configuration
-        """
-        model_changed = new_config.model_name != self.config.model_name
-        device_changed = new_config.device != self.config.device
-        
-        self.config = new_config
-        
-        if model_changed or device_changed:
-            print("Configuration changed, reloading model...")
-            self._load_model()
