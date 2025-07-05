@@ -429,18 +429,6 @@ class SLIVSDepthProcessor:
             processing_time=processing_time
         )
     
-    def get_depth_map(self, frame: np.ndarray) -> np.ndarray:
-        """
-        Get just the depth map without layer processing.
-        
-        Args:
-            frame: Input RGB frame
-            
-        Returns:
-            Depth map (H, W)
-        """
-        return self.estimate_depth(frame)
-    
     def get_layer_masks(self, depth_map: np.ndarray) -> Dict[str, np.ndarray]:
         """
         Get layer masks for a given depth map.
