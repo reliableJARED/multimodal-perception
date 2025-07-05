@@ -88,6 +88,7 @@ class SLIVSSam2Processor:
         }
         
         # Config file mapping
+        #Hydra manages the config loading - SAM2 uses Facebook's Hydra framework (THESE ARE NOT LOCAL DIRECTORIES - DON"T CHANGE)
         self.config_map = {
             "sam2.1_hiera_tiny": "configs/sam2.1/sam2.1_hiera_t.yaml",
             "sam2.1_hiera_small": "configs/sam2.1/sam2.1_hiera_s.yaml",
@@ -287,56 +288,11 @@ class SLIVSSam2Processor:
         )
     
     # TODO: Implement multipoint prompting (multiple points per segment)
-    def segment_from_multipoints(self, point_groups: List[List[Tuple[int, int]]], 
-                                label_groups: Optional[List[List[int]]] = None) -> SAM2ProcessingResult:
-        """
-        Generate segmentation using multiple points per object.
-        Each point group represents points for a single object.
-        
-        Args:
-            point_groups: List of point groups, where each group is [(x1,y1), (x2,y2), ...]
-            label_groups: List of label groups matching point_groups structure
-            
-        Returns:
-            SAM2ProcessingResult with segments
-        """
-        # TODO: Implement batch processing for multiple points per segment
-        # This would use the predict() method with multiple points for each segment
-        # Example: predictor.predict(point_coords=np.array([[x1,y1], [x2,y2]]), 
-        #                           point_labels=np.array([1, 1]))
-        raise NotImplementedError("Multipoint prompting not yet implemented")
-    
+
     # TODO: Implement automatic segmentation (segment everything)
-    def segment_everything(self, **kwargs) -> SAM2ProcessingResult:
-        """
-        Automatically segment everything in the image without prompts.
-        Uses SAM2's automatic mask generation capabilities.
-        
-        Args:
-            **kwargs: Additional parameters for automatic segmentation
-            
-        Returns:
-            SAM2ProcessingResult with all detected segments
-        """
-        # TODO: Implement automatic mask generation
-        # This would use SAM2AutomaticMaskGenerator or similar functionality
-        raise NotImplementedError("Automatic segmentation not yet implemented")
-    
+
     # TODO: Implement bounding box prompting
-    def segment_from_boxes(self, boxes: List[Tuple[int, int, int, int]]) -> SAM2ProcessingResult:
-        """
-        Generate segmentation from bounding box prompts.
-        
-        Args:
-            boxes: List of bounding boxes in format [(x1, y1, x2, y2), ...]
-            
-        Returns:
-            SAM2ProcessingResult with segments
-        """
-        # TODO: Implement bounding box prompting
-        # This would use the predict() method with box prompts
-        raise NotImplementedError("Bounding box prompting not yet implemented")
-    
+
     def _calculate_bounding_box(self, mask: np.ndarray) -> Tuple[int, int, int, int]:
         """Calculate bounding box for a mask."""
         if not np.any(mask):

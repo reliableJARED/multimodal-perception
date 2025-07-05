@@ -68,7 +68,8 @@ class SLIVSDepthProcessor:
                  model_name: str = "Intel/dpt-swinv2-tiny-256",
                  target_squares: int = 100,
                  min_fill_threshold: float = 0.7,
-                 device: Optional[str] = None):
+                 device: Optional[str] = None,
+                 depth_layer_config: Optional[Dict[str, DepthLayerConfig]] = None):
         """
         Initialize the depth processor.
         
@@ -77,18 +78,24 @@ class SLIVSDepthProcessor:
             target_squares: Target number of grid squares for point detection
             min_fill_threshold: Minimum fill ratio for valid squares (0.0-1.0)
             device: Device to use ('cuda', 'cpu', or None for auto)
+            depth_layer_config: Custom depth layer configuration. If None, uses default layers.
+
         """
         self.target_squares = target_squares
         self.min_fill_threshold = min_fill_threshold
         
-        # Default depth layer configuration
-        self.depth_layers = {
-            "furthest": DepthLayerConfig(0, 25, "Furthest"),
-            "far": DepthLayerConfig(26, 50, "Far"),
-            "mid": DepthLayerConfig(51, 75, "Mid"),
-            "near": DepthLayerConfig(76, 150, "Near"),
-            "closest": DepthLayerConfig(151, 255, "Closest"),
-        }
+        # Set depth layer configuration
+        if depth_layer_config is None:
+            # Default depth layer range and name configuration,
+            self.depth_layers = {
+                "furthest": DepthLayerConfig(0, 25, "Furthest"),
+                "far": DepthLayerConfig(26, 50, "Far"),
+                "mid": DepthLayerConfig(51, 75, "Mid"),
+                "near": DepthLayerConfig(76, 150, "Near"),
+                "closest": DepthLayerConfig(151, 255, "Closest"),
+            }
+        else:
+            self.depth_layers = depth_layer_config
         
         # Initialize device
         if device is None:
@@ -104,16 +111,6 @@ class SLIVSDepthProcessor:
         
         print(f"SLIVS Depth Processor initialized on {self.device}")
         print(f"Configured with {len(self.depth_layers)} depth layers")
-    
-    def update_depth_layers(self, new_config: Dict[str, DepthLayerConfig]) -> None:
-        """
-        Update depth layer configuration.
-        
-        Args:
-            new_config: New depth layer configuration
-        """
-        self.depth_layers = new_config
-        print(f"Updated depth layers: {len(self.depth_layers)} layers configured")
     
     def estimate_depth(self, frame: np.ndarray) -> np.ndarray:
         """

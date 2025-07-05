@@ -191,7 +191,6 @@ def main():
     )
 
     #Overide default 5 depth layers
-    # Default depth layer configuration
     depth_layers = {
             "furthest": DepthLayerConfig(0, 36, "Furthest"),
             "far": DepthLayerConfig(37, 73, "Far"),
