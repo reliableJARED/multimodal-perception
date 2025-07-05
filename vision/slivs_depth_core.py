@@ -69,7 +69,9 @@ class SLIVSDepthProcessor:
                  target_squares: int = 100,
                  min_fill_threshold: float = 0.7,
                  device: Optional[str] = None,
-                 depth_layer_config: Optional[Dict[str, DepthLayerConfig]] = None):
+                 depth_layer_config: Optional[Dict[str, DepthLayerConfig]] = None,
+                 frame_height: Optional[int] = None,
+                 frame_width: Optional[int] = None):
         """
         Initialize the depth processor.
         
@@ -79,6 +81,9 @@ class SLIVSDepthProcessor:
             min_fill_threshold: Minimum fill ratio for valid squares (0.0-1.0)
             device: Device to use ('cuda', 'cpu', or None for auto)
             depth_layer_config: Custom depth layer configuration. If None, uses default layers.
+            frame_height: Optional frame height for pre-calculating grid area used in object points
+            frame_width: Optional frame width for pre-calculating grid area used in object points
+
 
         """
         self.target_squares = target_squares
@@ -102,6 +107,13 @@ class SLIVSDepthProcessor:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
             self.device = torch.device(device)
+
+        # Pre-calculate grid if frame dimensions provided (optimization for video processing)
+        if frame_height is not None and frame_width is not None:
+            self.grid_info = self.calculate_optimal_grid(frame_height, frame_width)
+            print(f"Pre-calculated grid: {self.grid_info.squares_height}x{self.grid_info.squares_width} = {self.grid_info.total_squares} squares")
+        else:
+            self.grid_info = None
         
         # Load MiDaS model
         print(f"Loading MiDaS model: {model_name}")
@@ -207,7 +219,13 @@ class SLIVSDepthProcessor:
             Tuple of (points_list, grid_info)
         """
         height, width = layer_mask.shape
-        grid_info = self.calculate_optimal_grid(height, width)
+        # Use pre-calculated grid if available, otherwise calculate on-demand
+        if self.grid_info is not None:
+            grid_info = self.grid_info
+        else:
+            grid_info = self.calculate_optimal_grid(height, width)
+            #set for future use
+            self.grid_info = grid_info
         
         # First pass: find all qualifying squares
         qualifying_squares = []
@@ -288,7 +306,7 @@ class SLIVSDepthProcessor:
     
     def _combine_points_in_3x3_window(self, window_points: List[Tuple], square_centers: Dict) -> List[Tuple[int, int]]:
         """
-        Combine points within a single 3x3 window by rows and columns.
+        Combine points within a single 3x3 window by rows and columns. 3 in a row becomes 1 at center, 3 in col becomes 1 at center, 3x3 becomes 1 at center
         
         Args:
             window_points: Points in the 3x3 window
