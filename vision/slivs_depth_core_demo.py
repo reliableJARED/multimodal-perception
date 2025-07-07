@@ -197,7 +197,7 @@ def main():
     # Initialize processor
     processor = SLIVSDepthProcessor(
         model_name="Intel/dpt-swinv2-tiny-256",
-        target_squares=100,
+        target_squares=200,
         min_fill_threshold=0.7,
         depth_layer_config=depth_layers
     )
