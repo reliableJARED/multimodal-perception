@@ -403,7 +403,9 @@ def main():
     print("Bottom Row: SAM2 on RG-D | SAM2 on RGB | Comparison Info")
     print("Point prompt: Center of image (red circle)")
     print("Compare segmentation quality between RGB vs RG-Depth input")
-    print("Press 'q' to quit")
+    print("Controls:")
+    print("  - Press 'q' to quit")
+    print("  - Press 's' to save current 5-panel comparison image")
     print("=" * 70)
     
     # Initialize pipeline
@@ -432,6 +434,7 @@ def main():
     
     frame_count = 0
     fps_start_time = time.time()
+    save_counter = 0  # Counter for saved images
     
     while cap.isOpened():
         ret, frame = cap.read()
@@ -450,25 +453,53 @@ def main():
             fps_start_time = current_time
             print(f"FPS: {fps:.1f}")
         
-        # Add FPS counter to display
+        # Add FPS counter and save instruction to display
         if results:
-            fps_text = f"Frame: {frame_count}"
+            fps_text = f"Frame: {frame_count} | Press 's' to save image"
             cv2.putText(display_frame, fps_text, (10, display_frame.shape[0] - 20),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         
         # Show combined display
         cv2.imshow('SLIVS Pipeline Comparison: RGB vs RG-Depth Segmentation', display_frame)
         
-        # Break on 'q' key
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        # Handle key presses
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
             break
+        elif key == ord('s'):
+            # Save the current 5-panel display
+            save_counter += 1
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"slivs_comparison_{timestamp}_{save_counter:03d}.png"
+            
+            try:
+                cv2.imwrite(filename, display_frame)
+                print(f"\n✓ Saved comparison image: {filename}")
+                
+                # Also save individual results if available
+                if results:
+                    # Save individual data
+                    data_filename = f"slivs_data_{timestamp}_{save_counter:03d}.npz"
+                    np.savez(data_filename,
+                            depth_map=results['depth_map'],
+                            mask_rgd=results['mask_rgd'],
+                            mask_rgb=results['mask_rgb'],
+                            score_rgd=results['score_rgd'],
+                            score_rgb=results['score_rgb'],
+                            center_point=results['center_point'])
+                    print(f"✓ Saved data: {data_filename}")
+                    
+            except Exception as e:
+                print(f"\n✗ Failed to save image: {e}")
     
     # Cleanup
     cap.release()
     cv2.destroyAllWindows()
-    print("\n" + "=" * 50)
+    print("\n" + "=" * 70)
     print("Pipeline stopped successfully!")
-    print("=" * 50)
+    if save_counter > 0:
+        print(f"Total images saved: {save_counter}")
+    print("=" * 70)
 
 if __name__ == "__main__":
     main()
