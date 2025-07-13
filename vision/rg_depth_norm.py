@@ -371,8 +371,8 @@ class IntegratedSLIVSPipeline:
             depth_display = depth_frame
         depth_resized = cv2.resize(depth_display, (frame_width, frame_height))
         
-        # Convert float32 frame to uint8 for display
-        rgd_float32_display = np.clip(rgd_frame_float32, 0, 255).astype(np.uint8)
+        # Convert float32 frame to uint8 for display (multiply by 255 since it's in [0,1] range)
+        rgd_float32_display = np.clip(rgd_frame_float32 * 255.0, 0, 255).astype(np.uint8)
         
         rgd_legacy_resized = cv2.resize(rgd_frame_legacy, (frame_width, frame_height))
         rgd_float32_resized = cv2.resize(rgd_float32_display, (frame_width, frame_height))
@@ -392,7 +392,7 @@ class IntegratedSLIVSPipeline:
         cv2.putText(rgb_resized, "Original RGB", (10, 25), font, font_scale, text_color, font_thickness)
         cv2.putText(depth_resized, "Depth Map", (10, 25), font, font_scale, text_color, font_thickness)
         cv2.putText(rgd_legacy_resized, "RG-D Legacy (0-255)", (10, 25), font, font_scale, text_color, font_thickness)
-        cv2.putText(rgd_float32_resized, "RG-D Float32", (10, 25), font, font_scale, text_color, font_thickness)
+        cv2.putText(rgd_float32_resized, "RG-D Float32 [0,1]", (10, 25), font, font_scale, text_color, font_thickness)
         cv2.putText(seg_legacy_resized, "SAM2 Legacy RG-D", (10, 25), font, font_scale, text_color, font_thickness)
         cv2.putText(seg_float32_resized, "SAM2 Float32 RG-D", (10, 25), font, font_scale, text_color, font_thickness)
         cv2.putText(seg_rgb_resized, "SAM2 RGB Only", (10, 25), font, font_scale, text_color, font_thickness)
