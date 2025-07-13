@@ -226,22 +226,17 @@ class IntegratedSLIVSPipeline:
         if self.sam_predictor is None:
             raise RuntimeError("SAM2 model not loaded")
         
-        # Convert float32 [0,1] to uint8 [0,255] for SAM2 (it expects uint8 RGB)
-        # But preserve the high precision by careful conversion
-        if image_float32.dtype == np.float32:
-            # Scale back to 0-255 range with proper rounding
-            image_uint8 = np.clip(image_float32 * 255.0, 0, 255).astype(np.uint8)
+        # Keep as float32 in [0,1] range - SAM2's ToTensor() can handle this directly!
+        # No conversion to uint8 - preserve full float32 precision
+
+        # Convert BGR to RGB for SAM2 (if needed) and ensure contiguous array
+        if len(image_float32.shape) == 3 and image_float32.shape[2] == 3:
+            # For RG-D data, reverse channel order and ensure contiguous array  
+            image_rgb = image_float32[:, :, ::-1].copy()
         else:
-            image_uint8 = image_float32
+            image_rgb = image_float32.copy()
         
-        # Convert BGR to RGB for SAM2 (if needed)
-        if len(image_uint8.shape) == 3 and image_uint8.shape[2] == 3:
-            # For RG-D data, we don't need BGR->RGB conversion as channels are R,G,D
-            # Use copy() to ensure contiguous array and avoid negative stride issues
-            image_rgb = image_uint8[:, :, ::-1].copy()
-        else:
-            image_rgb = image_uint8.copy()
-        
+       
         # Set image for predictor
         self.sam_predictor.set_image(image_rgb)
         
