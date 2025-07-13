@@ -226,17 +226,22 @@ class IntegratedSLIVSPipeline:
         if self.sam_predictor is None:
             raise RuntimeError("SAM2 model not loaded")
         
-        # Keep as float32 in [0,1] range - SAM2's ToTensor() can handle this directly!
-        # No conversion to uint8 - preserve full float32 precision
-
-        # Convert BGR to RGB for SAM2 (if needed) and ensure contiguous array
-        if len(image_float32.shape) == 3 and image_float32.shape[2] == 3:
-            # For RG-D data, reverse channel order and ensure contiguous array  
-            image_rgb = image_float32[:, :, ::-1].copy()
+        # Convert float32 [0,1] to uint8 [0,255] for SAM2 (it expects uint8 RGB)
+        # But preserve the high precision by careful conversion
+        if image_float32.dtype == np.float32:
+            # Scale back to 0-255 range with proper rounding
+            image_uint8 = np.clip(image_float32 * 255.0, 0, 255).astype(np.uint8)
         else:
-            image_rgb = image_float32.copy()
+            image_uint8 = image_float32
         
-       
+        # Convert BGR to RGB for SAM2 (if needed)
+        if len(image_uint8.shape) == 3 and image_uint8.shape[2] == 3:
+            # For RG-D data, we don't need BGR->RGB conversion as channels are R,G,D
+            # Use copy() to ensure contiguous array and avoid negative stride issues
+            image_rgb = image_uint8[:, :, ::-1].copy()
+        else:
+            image_rgb = image_uint8.copy()
+        
         # Set image for predictor
         self.sam_predictor.set_image(image_rgb)
         
@@ -316,7 +321,72 @@ class IntegratedSLIVSPipeline:
         best_idx = np.argmax(scores)
         return masks[best_idx], scores[best_idx]
     
+    def debug_sam_inputs(self, image_uint8, image_float32, point_coords):
+        """
+        Debug function to compare what SAM2 actually receives for both input types
+        """
+        print("\n=== DEBUG: SAM2 Input Analysis ===")
+        
+        # Process uint8 input
+        self.sam_predictor.set_image(image_uint8)
+        # Access the processed image from SAM2's internal state
+        # Note: This might not be directly accessible, but we can check the transforms
+        
+        # Process float32 input  
+        self.sam_predictor.set_image(image_float32)
+        
+        # Compare the raw inputs before SAM2 processing
+        print(f"uint8 input - dtype: {image_uint8.dtype}, range: [{image_uint8.min():.3f}, {image_uint8.max():.3f}]")
+        print(f"float32 input - dtype: {image_float32.dtype}, range: [{image_float32.min():.3f}, {image_float32.max():.3f}]")
+        
+        # Show depth channel differences
+        uint8_depth = image_uint8[:, :, 0]  # Blue channel (depth)
+        float32_depth = image_float32[:, :, 0]
+        
+        print(f"uint8 depth channel unique values: {len(np.unique(uint8_depth))}")
+        print(f"float32 depth channel unique values: {len(np.unique(float32_depth))}")
+        print(f"uint8 depth range: [{uint8_depth.min()}, {uint8_depth.max()}]")
+        print(f"float32 depth range: [{float32_depth.min():.6f}, {float32_depth.max():.6f}]")
+        
+        # Check if ToTensor() makes them identical
+        from torchvision.transforms import ToTensor
+        to_tensor = ToTensor()
+        
+        tensor_uint8 = to_tensor(image_uint8)
+        tensor_float32 = to_tensor(image_float32)
+        
+        print(f"After ToTensor() - uint8: {tensor_uint8.dtype}, range: [{tensor_uint8.min():.6f}, {tensor_uint8.max():.6f}]")
+        print(f"After ToTensor() - float32: {tensor_float32.dtype}, range: [{tensor_float32.min():.6f}, {tensor_float32.max():.6f}]")
+        print(f"Tensors are identical: {torch.allclose(tensor_uint8, tensor_float32)}")
+        
+        print("=== END DEBUG ===\n")
+
     def create_segmentation_overlay(self, rgb_frame, mask, point_coords, score):
+        """Create segmentation overlay with mask and point"""
+        overlay = rgb_frame.copy().astype(np.uint8)
+        
+        # Ensure mask is boolean numpy array
+        if isinstance(mask, torch.Tensor):
+            mask = mask.cpu().numpy()
+        mask = mask.astype(bool)
+        
+        # Ensure point_coords are integers
+        point_coords = [int(point_coords[0]), int(point_coords[1])]
+        
+        # Create colored mask overlay
+        mask_color = np.array([0, 255, 0], dtype=np.uint8)  # Green
+        overlay[mask] = (overlay[mask].astype(np.float32) * 0.7 + mask_color.astype(np.float32) * 0.3).astype(np.uint8)
+        
+        # Draw point
+        cv2.circle(overlay, tuple(point_coords), 8, (0, 0, 255), -1)  # Red point
+        cv2.circle(overlay, tuple(point_coords), 10, (255, 255, 255), 2)  # White border
+        
+        # Add score text
+        score_text = f"Score: {score:.3f}"
+        cv2.putText(overlay, score_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
+                   0.7, (255, 255, 255), 2)
+        
+        return overlay
         """Create segmentation overlay with mask and point"""
         overlay = rgb_frame.copy().astype(np.uint8)
         
@@ -405,7 +475,39 @@ class IntegratedSLIVSPipeline:
         
         return combined
     
-    def process_frame(self, frame):
+    def debug_sam_inputs(self, image_uint8, image_float32, point_coords):
+        """
+        Debug function to compare what SAM2 actually receives for both input types
+        """
+        print("\n=== DEBUG: SAM2 Input Analysis ===")
+        
+        # Compare the raw inputs before SAM2 processing
+        print(f"uint8 input - dtype: {image_uint8.dtype}, range: [{image_uint8.min():.3f}, {image_uint8.max():.3f}]")
+        print(f"float32 input - dtype: {image_float32.dtype}, range: [{image_float32.min():.3f}, {image_float32.max():.3f}]")
+        
+        # Show depth channel differences
+        uint8_depth = image_uint8[:, :, 0]  # Blue channel (depth)
+        float32_depth = image_float32[:, :, 0]
+        
+        print(f"uint8 depth channel unique values: {len(np.unique(uint8_depth))}")
+        print(f"float32 depth channel unique values: {len(np.unique(float32_depth))}")
+        print(f"uint8 depth range: [{uint8_depth.min()}, {uint8_depth.max()}]")
+        print(f"float32 depth range: [{float32_depth.min():.6f}, {float32_depth.max():.6f}]")
+        
+        # Check if ToTensor() makes them identical
+        from torchvision.transforms import ToTensor
+        to_tensor = ToTensor()
+        
+        tensor_uint8 = to_tensor(image_uint8)
+        tensor_float32 = to_tensor(image_float32)
+        
+        print(f"After ToTensor() - uint8: {tensor_uint8.dtype}, range: [{tensor_uint8.min():.6f}, {tensor_uint8.max():.6f}]")
+        print(f"After ToTensor() - float32: {tensor_float32.dtype}, range: [{tensor_float32.min():.6f}, {tensor_float32.max():.6f}]")
+        print(f"Tensors are identical: {torch.allclose(tensor_uint8, tensor_float32)}")
+        
+        print("=== END DEBUG ===\n")
+
+    def process_frame(self, frame, frame_count=0):
         """Process single frame through complete pipeline with precision comparison"""
         height, width = frame.shape[:2]
         center_point = [width // 2, height // 2]
@@ -435,6 +537,14 @@ class IntegratedSLIVSPipeline:
             
             # Step 3b: SAM2 segmentation on float32 RG-Depth
             mask_rgd_float32, score_rgd_float32 = self.segment_with_sam2_float32(rgd_frame_float32, center_point)
+            
+            # DEBUG: Compare what SAM2 actually receives (uncomment to debug)
+            if frame_count % 60 == 0:  # Debug every 60 frames
+                self.debug_sam_inputs(
+                    (rgd_frame_legacy[:, :, ::-1]).copy(),  # Convert to RGB
+                    rgd_frame_float32[:, :, ::-1].copy(),   # Convert to RGB
+                    center_point
+                )
             
             # Step 3c: SAM2 segmentation on original RGB (for comparison)
             mask_rgb, score_rgb = self.segment_with_sam2(frame, center_point)
@@ -545,7 +655,7 @@ def main():
             break
         
         # Process frame through pipeline
-        display_frame, results = pipeline.process_frame(frame)
+        display_frame, results = pipeline.process_frame(frame, frame_count)
         
         # Calculate and display FPS
         frame_count += 1
@@ -560,6 +670,10 @@ def main():
                 print(f"Scores - Legacy: {results['score_rgd_legacy']:.3f}, "
                       f"Float32: {results['score_rgd_float32']:.3f}, "
                       f"RGB: {results['score_rgb']:.3f}")
+                
+                # Check if scores are identical (which confirms our theory)
+                if abs(results['score_rgd_legacy'] - results['score_rgd_float32']) < 0.001:
+                    print("⚠️  IDENTICAL SCORES: SAM2 likely converts both inputs to same representation")
         
         # Add FPS counter and save instruction to display
         if results:
